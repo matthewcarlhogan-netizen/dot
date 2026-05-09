@@ -217,13 +217,15 @@ class Handler(BaseHTTPRequestHandler):
         def value(name: str, default: str) -> str:
             return form.get(name, [default])[0]
 
+        style = value("style", "swap")
+        preset = value("preset", "natural")
         cmd = [
             str(ROOT / "run.sh"),
             "--source", value("source", "data/source_face.webm"),
             "--camera", value("camera", "1"),
             "--backend", value("backend", "simswap"),
-            "--style", value("style", "swap"),
-            "--preset", value("preset", "natural"),
+            "--style", style,
+            "--preset", "fast" if style == "avatar" else preset,
             "--output", value("output", "window"),
         ]
         PROCESS = subprocess.Popen(cmd, cwd=ROOT)

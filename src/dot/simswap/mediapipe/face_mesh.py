@@ -199,3 +199,38 @@ class FaceMesh:
             M_list.append(M)
 
         return align_img_list, M_list
+
+    def get_all_landmarks(self, image: np.ndarray) -> Optional[List[np.ndarray]]:
+        """Get all 468 MediaPipe face landmarks (not just the 5 key points).
+
+        Args:
+            image (np.ndarray): BGR image.
+
+        Returns:
+            Optional[List[np.ndarray]]: List of (468, 3) landmark arrays, one per face detected.
+                Each row is (x, y, z) in pixel coordinates (z is relative depth).
+                Returns None if no face detected.
+        """
+        if mp_face_mesh is None:
+            raise RuntimeError("MediaPipe FaceMesh is unavailable.")
+
+        with mp_face_mesh.FaceMesh(
+            static_image_mode=self.static_image_mode,
+            max_num_faces=self.max_num_faces,
+            refine_landmarks=self.refine_landmarks,
+            min_detection_confidence=self.min_detection_confidence,
+        ) as face_mesh:
+
+            detection = face_mesh.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            if not detection.multi_face_landmarks:
+                return None
+
+            height, width, _ = image.shape
+            all_faces = []
+            for face_landmarks in detection.multi_face_landmarks:
+                landmarks = np.empty((len(face_landmarks.landmark), 3), dtype=np.float32)
+                for i, lm in enumerate(face_landmarks.landmark):
+                    landmarks[i] = [lm.x * width, lm.y * height, lm.z * max(width, height)]
+                all_faces.append(landmarks)
+
+            return all_faces

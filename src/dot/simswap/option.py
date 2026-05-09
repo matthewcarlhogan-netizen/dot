@@ -9,8 +9,8 @@ from PIL import Image
 from torchvision import transforms
 
 from dot.commons.utils import get_device, get_model_base_path, VIDEO_EXTENSIONS
+from dot.commons.shared_detector import get_static_detector, get_live_detector
 from dot.simswap.fs_model import create_model
-from dot.simswap.mediapipe.face_mesh import FaceMesh
 from dot.simswap.parsing_model.model import BiSeNet
 from dot.simswap.util.norm import SpecificNorm
 from dot.simswap.util.reverse2original import reverse2wholeimage
@@ -82,12 +82,15 @@ class SimswapOption:
             if min_detection_confidence is None
             else min_detection_confidence
         )
-        self.detect_model = FaceMesh(
-            static_image_mode=not is_camera,
+        self.detect_model = get_live_detector(
             max_num_faces=max_num_faces,
             refine_landmarks=True,
             min_detection_confidence=detection_confidence,
             min_tracking_confidence=min_tracking_confidence,
+        ) if is_camera else get_static_detector(
+            max_num_faces=max_num_faces,
+            refine_landmarks=True,
+            min_detection_confidence=detection_confidence,
             mode=self.mode,
         )
 

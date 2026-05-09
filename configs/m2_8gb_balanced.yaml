@@ -27,3 +27,15 @@ enable_memory_pooling: true       # Reuse GPU memory across batches
 detection_threshold: 0.6          # Good balance: catches faces, reduces false positives
 face_size_threshold: 20           # Skip faces smaller than 20px (noise reduction)
 max_num_faces: 1                  # One face keeps 8GB systems stable
+
+# QUALITY: natural rendering pipeline
+natural_color_match: true
+natural_color_match_strength: 0.90
+natural_detail_enhance: true
+natural_detail_enhance_strength: 0.10
+natural_preserve_occluders: true
+natural_occluder_threshold: 0.10
+natural_occluder_strength: 0.90
+natural_blend_mode: alpha
+natural_blend_strength: 0.88
+natural_mask_blur: 25
