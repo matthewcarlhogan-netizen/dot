@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const ACCEPTED_SOURCE_PREFIXES = ["image/", "video/"];
+const ACCEPTED_FRAME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -29,6 +31,14 @@ export async function POST(request: NextRequest) {
 
   if (!(frame instanceof File) || frame.size === 0) {
     return jsonError("Start the camera and capture a preview frame first.");
+  }
+
+  if (!ACCEPTED_SOURCE_PREFIXES.some((prefix) => source.type.startsWith(prefix))) {
+    return jsonError("Source must be an image or short video.");
+  }
+
+  if (!ACCEPTED_FRAME_TYPES.has(frame.type)) {
+    return jsonError("Preview frame must be a browser-captured image.");
   }
 
   const jobId = `mw_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;

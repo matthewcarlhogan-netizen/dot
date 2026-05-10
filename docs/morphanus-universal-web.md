@@ -16,13 +16,25 @@ Paid launch stays frozen until:
 - Export metering is implemented before live-session metering.
 - The customer flow works from a clean browser without terminal setup.
 
+## Remote Demo
+
+The local app can be exposed temporarily through a tunnel for remote testing. Use production mode for this demo:
+
+```bash
+cd /Users/matt/dot/morphanus-web
+npm run build
+npm run start -- --port 3000
+```
+
+Then tunnel `127.0.0.1:3000` with the available tunnel provider. Do not add payment, uploads to third-party storage, or public gallery behavior to the remote demo.
+
 ## MVP Flow
 
 1. Open the web app.
 2. Upload a source image or short video.
 3. Grant camera permission.
 4. Confirm consent.
-5. Create a short export.
+5. Create a short export that composites the uploaded source into the captured camera frame.
 6. Download the result.
 
 ## Native Apps

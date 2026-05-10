@@ -7,7 +7,8 @@
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
-    "lint": "next lint"
+    "lint": "next lint",
+    "smoke": "node scripts/smoke-api.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

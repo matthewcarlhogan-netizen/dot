@@ -31,6 +31,125 @@ type ExportResponse = {
   };
 };
 
+const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
+const ACCEPTED_SOURCE_PREFIXES = ["image/", "video/"];
+const SOURCE_FRAME_TIMEOUT_MS = 4000;
+
+type SourceFrame = {
+  element: CanvasImageSource;
+  width: number;
+  height: number;
+  cleanup: () => void;
+};
+
+function drawImageCover(
+  context: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const sourceRatio = sourceWidth / sourceHeight;
+  const targetRatio = width / height;
+  let cropWidth = sourceWidth;
+  let cropHeight = sourceHeight;
+  let cropX = 0;
+  let cropY = 0;
+
+  if (sourceRatio > targetRatio) {
+    cropWidth = sourceHeight * targetRatio;
+    cropX = (sourceWidth - cropWidth) / 2;
+  } else {
+    cropHeight = sourceWidth / targetRatio;
+    cropY = (sourceHeight - cropHeight) / 2;
+  }
+
+  context.drawImage(image, cropX, cropY, cropWidth, cropHeight, x, y, width, height);
+}
+
+function loadImageFrame(file: File): Promise<SourceFrame> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      resolve({
+        element: image,
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+        cleanup: () => URL.revokeObjectURL(url),
+      });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read the uploaded image source."));
+    };
+    image.src = url;
+  });
+}
+
+function loadVideoFrame(file: File): Promise<SourceFrame> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    let settled = false;
+    let timer: number | null = null;
+
+    function cleanupUrl() {
+      if (timer) window.clearTimeout(timer);
+      URL.revokeObjectURL(url);
+    }
+
+    function resolveFrame() {
+      if (settled || video.videoWidth === 0 || video.videoHeight === 0) return;
+      settled = true;
+      resolve({
+        element: video,
+        width: video.videoWidth,
+        height: video.videoHeight,
+        cleanup: cleanupUrl,
+      });
+    }
+
+    function rejectFrame(message: string) {
+      if (settled) return;
+      settled = true;
+      cleanupUrl();
+      reject(new Error(message));
+    }
+
+    timer = window.setTimeout(() => {
+      rejectFrame("Could not read a frame from the uploaded video source.");
+    }, SOURCE_FRAME_TIMEOUT_MS);
+
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.onloadeddata = resolveFrame;
+    video.onseeked = resolveFrame;
+    video.onerror = () => rejectFrame("Could not read the uploaded video source.");
+    video.onloadedmetadata = () => {
+      const seekTarget = Number.isFinite(video.duration) && video.duration > 0 ? Math.min(0.1, video.duration / 2) : 0;
+      try {
+        video.currentTime = seekTarget;
+      } catch {
+        resolveFrame();
+      }
+    };
+    video.src = url;
+    video.load();
+  });
+}
+
+async function loadSourceFrame(file: File): Promise<SourceFrame> {
+  if (file.type.startsWith("image/")) return loadImageFrame(file);
+  if (file.type.startsWith("video/")) return loadVideoFrame(file);
+  throw new Error("Choose an image or short video source.");
+}
+
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -56,19 +175,41 @@ export default function Home() {
 
   function handleSourceChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
-    setSourceFile(file);
     setResultUrl(null);
     setJobId(null);
     setError(null);
 
     if (sourcePreview) URL.revokeObjectURL(sourcePreview);
-    setSourcePreview(file ? URL.createObjectURL(file) : null);
+    setSourcePreview(null);
+
+    if (!file) {
+      setSourceFile(null);
+      return;
+    }
+
+    if (!ACCEPTED_SOURCE_PREFIXES.some((prefix) => file.type.startsWith(prefix))) {
+      setSourceFile(null);
+      setError("Choose an image or short video source.");
+      return;
+    }
+
+    if (file.size > MAX_SOURCE_BYTES) {
+      setSourceFile(null);
+      setError("Source is over the 25MB web MVP limit.");
+      return;
+    }
+
+    setSourceFile(file);
+    setSourcePreview(URL.createObjectURL(file));
   }
 
   async function startCamera() {
     setError(null);
     setCameraState("starting");
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("This browser does not expose camera capture. Use a current Chrome, Edge, Safari, or Firefox build.");
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
@@ -85,7 +226,11 @@ export default function Home() {
       setCameraState("ready");
     } catch (cameraError) {
       setCameraState("blocked");
-      setError(cameraError instanceof Error ? cameraError.message : "Camera permission failed.");
+      setError(
+        cameraError instanceof Error
+          ? cameraError.message
+          : "Camera permission failed. Use HTTPS or localhost and allow camera access.",
+      );
     }
   }
 
@@ -96,45 +241,94 @@ export default function Home() {
     setCameraState("idle");
   }
 
-  function drawProcessedFrame(): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const context = canvas?.getContext("2d");
+  async function drawProcessedFrame(source: File): Promise<Blob> {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
 
-      if (!video || !canvas || !context || video.videoWidth === 0 || video.videoHeight === 0) {
-        reject(new Error("Camera preview is not ready."));
-        return;
-      }
+    if (!video || !canvas || !context || video.videoWidth === 0 || video.videoHeight === 0) {
+      throw new Error("Camera preview is not ready.");
+    }
 
+    const sourceFrame = await loadSourceFrame(source);
+
+    try {
       canvas.width = Math.min(video.videoWidth, 1280);
       canvas.height = Math.round((canvas.width / video.videoWidth) * video.videoHeight);
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const overlay = context.createLinearGradient(0, 0, canvas.width, canvas.height);
-      overlay.addColorStop(0, "rgba(112, 195, 173, 0.22)");
-      overlay.addColorStop(1, "rgba(241, 195, 91, 0.12)");
+      overlay.addColorStop(0, "rgba(112, 195, 173, 0.12)");
+      overlay.addColorStop(1, "rgba(241, 195, 91, 0.08)");
       context.fillStyle = overlay;
       context.fillRect(0, 0, canvas.width, canvas.height);
 
+      const injectionSize = Math.min(canvas.width * 0.36, canvas.height * 0.55);
+      const injectionWidth = injectionSize * 0.78;
+      const injectionHeight = injectionSize;
+      const injectionX = (canvas.width - injectionWidth) / 2;
+      const injectionY = canvas.height * 0.16;
+      const radiusX = injectionWidth / 2;
+      const radiusY = injectionHeight / 2;
+      const centerX = injectionX + radiusX;
+      const centerY = injectionY + radiusY;
+
+      context.save();
+      context.beginPath();
+      context.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+      context.clip();
+      drawImageCover(
+        context,
+        sourceFrame.element,
+        sourceFrame.width,
+        sourceFrame.height,
+        injectionX,
+        injectionY,
+        injectionWidth,
+        injectionHeight,
+      );
+      context.globalCompositeOperation = "multiply";
+      context.fillStyle = "rgba(255, 220, 170, 0.12)";
+      context.fillRect(injectionX, injectionY, injectionWidth, injectionHeight);
+      context.restore();
+      context.globalCompositeOperation = "source-over";
+
+      const feather = context.createRadialGradient(centerX, centerY, radiusX * 0.72, centerX, centerY, radiusX * 1.04);
+      feather.addColorStop(0, "rgba(112, 195, 173, 0)");
+      feather.addColorStop(1, "rgba(112, 195, 173, 0.58)");
+      context.fillStyle = feather;
+      context.beginPath();
+      context.ellipse(centerX, centerY, radiusX * 1.04, radiusY * 1.04, 0, 0, Math.PI * 2);
+      context.fill();
+
+      context.strokeStyle = "rgba(245, 247, 241, 0.8)";
+      context.lineWidth = Math.max(2, canvas.width * 0.003);
+      context.beginPath();
+      context.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+      context.stroke();
+
       context.fillStyle = "rgba(12, 15, 18, 0.78)";
-      context.fillRect(18, canvas.height - 54, 212, 36);
+      context.fillRect(18, canvas.height - 54, 242, 36);
       context.fillStyle = "#f5f7f1";
       context.font = "700 16px system-ui";
-      context.fillText("Morphanus Web MVP", 32, canvas.height - 31);
+      context.fillText("Source injected preview", 32, canvas.height - 31);
 
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) {
-            reject(new Error("Could not capture a preview frame."));
-            return;
-          }
-          resolve(blob);
-        },
-        "image/png",
-        0.92,
-      );
-    });
+      return await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error("Could not capture a preview frame."));
+              return;
+            }
+            resolve(blob);
+          },
+          "image/png",
+          0.92,
+        );
+      });
+    } finally {
+      sourceFrame.cleanup();
+    }
   }
 
   async function createExport() {
@@ -158,7 +352,7 @@ export default function Home() {
     setProgress(25);
 
     try {
-      const frameBlob = await drawProcessedFrame();
+      const frameBlob = await drawProcessedFrame(sourceFile);
       setExportState("uploading");
       setProgress(65);
 
@@ -188,7 +382,9 @@ export default function Home() {
     }
   }
 
-  const canExport = sourceFile && consent && cameraState === "ready" && exportState !== "uploading";
+  const canExport = Boolean(
+    sourceFile && consent && cameraState === "ready" && exportState !== "uploading" && exportState !== "capturing",
+  );
   const cameraLabel =
     cameraState === "ready"
       ? "Camera ready"
