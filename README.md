@@ -1,4 +1,32 @@
-# DOT Live Face Swap
+# Morphanus / DOT
+
+Morphanus is moving to a browser-first product. The customer-facing MVP lives in
+`morphanus-web/`; the Python DOT runner remains a local prototype and model lab.
+
+## Universal Web MVP
+
+```bash
+cd morphanus-web
+npm install
+npm run dev
+```
+
+Open:
+
+```text
+http://127.0.0.1:3000
+```
+
+The web MVP supports camera capture, source upload, consent gating, and a short-export
+API contract. Paid checkout is intentionally locked until hosted inference, metering,
+retry-safe billing, and commercial rights are cleared.
+
+See:
+
+- `docs/morphanus-universal-web.md`
+- `docs/commercial-rights-audit.md`
+
+## DOT Local Prototype
 
 Minimal local workflow:
 

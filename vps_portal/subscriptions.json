@@ -1,0 +1,49 @@
+{
+  "customers": {
+    "local-test@example.com": {
+      "created_at": "2026-05-08T05:08:07.267426+00:00",
+      "email": "local-test@example.com",
+      "expires_at": "2026-06-07T05:08:07.267578+00:00",
+      "key": "DOT-D3E3A966-997DA1C4-A52E9E76",
+      "plan": "monthly",
+      "renewal_cancelled": false,
+      "status": "active",
+      "updated_at": "2026-05-08T05:08:07.267605+00:00"
+    },
+    "ten@example.com": {
+      "created_at": "2026-05-09T14:53:57.091911+00:00",
+      "email": "ten@example.com",
+      "expires_at": "2027-05-09T14:53:57.091926+00:00",
+      "key": "DOT-89AAE827-FF32422B-1ABA1F60",
+      "plan": "uses_10",
+      "renewal_cancelled": false,
+      "status": "active",
+      "updated_at": "2026-05-09T14:53:57.091949+00:00",
+      "uses_allowed": 10,
+      "uses_remaining": 10
+    },
+    "test@example.com": {
+      "created_at": "2026-05-09T07:34:17.198384+00:00",
+      "email": "test@example.com",
+      "expires_at": "2026-06-08T07:34:17.198403+00:00",
+      "key": "DOT-07AE7151-EDF70FE3-C5EF6E5A",
+      "plan": "monthly",
+      "renewal_cancelled": false,
+      "status": "active",
+      "updated_at": "2026-05-09T07:34:17.198460+00:00"
+    },
+    "three@example.com": {
+      "created_at": "2026-05-09T14:53:57.082146+00:00",
+      "email": "three@example.com",
+      "expires_at": "2027-05-09T14:53:57.082159+00:00",
+      "key": "DOT-22EF931C-19E963CF-9C975EE3",
+      "plan": "uses_3",
+      "renewal_cancelled": false,
+      "status": "active",
+      "updated_at": "2026-05-09T14:53:57.082185+00:00",
+      "uses_allowed": 3,
+      "uses_remaining": 3
+    }
+  },
+  "invoices": {}
+}
