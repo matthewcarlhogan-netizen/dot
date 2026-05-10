@@ -150,6 +150,31 @@ pip install -e .
 - Download dot model checkpoints from [here](https://drive.google.com/file/d/1Y_11R66DL4N1WY8cNlXVNR3RkHnGDGWX/view)
 - Unzip the downloaded file in the root of this project
 
+
+### 2-minute wow path (CLI + GUI wizard)
+
+This path mirrors the new first-run wizard behavior:
+
+1. Keep your source assets in `./data` (default sample workflow path).
+2. Start CLI wizard (auto camera detection + model validation + guided demo):
+
+```bash
+dot --source ./data --target 0 --wizard --show_fps
+```
+
+3. Optional: export a non-sensitive setup bundle for teammates:
+
+```bash
+dot --source ./data --target 0 --wizard --share_setup
+```
+
+4. Start GUI (`python -m dot.ui.ui`) and leave `first_run_wizard` enabled (default).
+   - Wizard preloads source from `./data`
+   - Auto-detects camera
+   - Runs a short guided demo (default frame limit)
+   - Writes local success summary to `.dot/last_success_summary.json`
+   - Optional share bundle to `.dot/share_setup.yaml`
+
 #### CLI Usage
 
 Run `dot --help` to get a full list of available options.

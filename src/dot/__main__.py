@@ -11,6 +11,14 @@ import click
 import yaml
 
 from .dot import DOT
+from .wizard import (
+    detect_camera,
+    export_share_setup,
+    load_sample_workflow,
+    run_guided_demo,
+    save_success_summary,
+    validate_model_paths,
+)
 
 
 def run(
@@ -31,6 +39,8 @@ def run(
     use_video: bool = False,
     use_image: bool = False,
     limit: int = None,
+    wizard: bool = False,
+    share_setup: bool = False,
 ):
     """Builds a DOT object and runs it.
 
@@ -53,6 +63,26 @@ def run(
         limit (int, optional): The number of frames to process. Defaults to None.
     """
     try:
+        if wizard:
+            workflow = load_sample_workflow(None)
+            workflow["source"] = source or workflow["source"]
+            workflow["target"] = detect_camera() if str(target) in {"", "None"} else target
+            workflow["use_gpu"] = use_gpu
+            workflow["swap_type"] = swap_type or workflow["swap_type"]
+            model_status = validate_model_paths({
+                "model_path": model_path,
+                "parsing_model_path": parsing_model_path,
+                "arcface_model_path": arcface_model_path,
+                "checkpoints_dir": checkpoints_dir,
+            })
+            print(f"Wizard model validation: {model_status}")
+            fps = run_guided_demo(lambda **k: run(wizard=False, share_setup=False, **k), workflow)
+            summary_path = save_success_summary(workflow, fps)
+            print(f"Wizard summary saved: {summary_path}")
+            if share_setup:
+                share_path = export_share_setup(workflow)
+                print(f"Share setup exported: {share_path}")
+            return
         # initialize dot
         _dot = DOT(use_video=use_video, use_image=use_image, save_folder=save_folder)
 
@@ -172,6 +202,8 @@ def run(
     help="Pass flag to use image-swap pipeline.",
 )
 @click.option("--limit", "limit", type=int, default=None)
+@click.option("--wizard", "wizard", is_flag=True, default=False, help="Run first-run wizard with guided demo.")
+@click.option("--share_setup", "share_setup", is_flag=True, default=False, help="Export non-sensitive setup bundle.")
 @click.option(
     "-c",
     "--config",
@@ -198,6 +230,8 @@ def main(
     use_image: bool = False,
     limit: int = None,
     config_file: str = None,
+    wizard: bool = False,
+    share_setup: bool = False,
 ):
     """CLI entrypoint for dot."""
     # load config, if provided
@@ -225,6 +259,8 @@ def main(
         use_video=use_video,
         use_image=use_image,
         limit=limit,
+        wizard=wizard,
+        share_setup=share_setup,
     )
 
 
