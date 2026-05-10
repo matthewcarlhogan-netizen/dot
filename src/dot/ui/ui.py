@@ -15,6 +15,7 @@ import customtkinter
 import yaml
 
 from dot.__main__ import run
+from dot.wizard import detect_camera, load_sample_workflow
 
 customtkinter.set_appearance_mode("Dark")
 customtkinter.set_default_color_theme("blue")
@@ -268,7 +269,10 @@ class TabView:
             )
         self.target_label.grid(row=2, column=0, pady=10, padx=(35, 20), sticky="w")
         if (not self.use_image) and (not self.use_video):
-            self.target.insert(0, 0)
+            demo = load_sample_workflow(None)
+            self.source.insert(0, demo.get("source", "./data"))
+            self.target.insert(0, detect_camera())
+            self.show_fps_checkbox.select()
 
         self.CreateToolTip(self.target, text=self.target_tip_text)
 
@@ -593,9 +597,25 @@ class TabView:
             variable=self.head_pose_checkbox_var,
         )
 
+        self.wizard_checkbox_var = tkinter.IntVar(value=1)
+        self.wizard_checkbox = customtkinter.CTkCheckBox(
+            master=self.checkbox_slider_frame,
+            text="first_run_wizard",
+            variable=self.wizard_checkbox_var,
+        )
+
+        self.share_setup_checkbox_var = tkinter.IntVar()
+        self.share_setup_checkbox = customtkinter.CTkCheckBox(
+            master=self.checkbox_slider_frame,
+            text="share_setup",
+            variable=self.share_setup_checkbox_var,
+        )
+
         self.show_fps_checkbox.grid(row=1, column=3, pady=(39, 0), padx=20, sticky="w")
         self.use_gpu_checkbox.grid(row=2, column=3, pady=(20, 0), padx=20, sticky="w")
         self.head_pose_checkbox.grid(row=5, column=3, pady=(20, 0), padx=20, sticky="w")
+        self.wizard_checkbox.grid(row=6, column=3, pady=(20, 0), padx=20, sticky="w")
+        self.share_setup_checkbox.grid(row=7, column=3, pady=(20, 0), padx=20, sticky="w")
         self.CreateToolTip(self.show_fps_checkbox, text="Show the fps value")
         self.CreateToolTip(
             self.use_gpu_checkbox,
@@ -605,6 +625,8 @@ class TabView:
         self.CreateToolTip(
             self.head_pose_checkbox, text="Estimate head pose before swap. Used by fomm"
         )
+        self.CreateToolTip(self.wizard_checkbox, text="Run first-run wizard with auto-detect and guided demo")
+        self.CreateToolTip(self.share_setup_checkbox, text="Export non-sensitive setup for team replication")
 
         # create run button
         self.error_label = customtkinter.CTkLabel(
@@ -767,6 +789,8 @@ class TabView:
                 use_video=self.use_video,
                 use_image=self.use_image,
                 limit=None,
+                wizard=bool(self.wizard_checkbox_var.get()),
+                share_setup=bool(self.share_setup_checkbox_var.get()),
             )
         except Exception as e:
             print(e)
