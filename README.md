@@ -69,6 +69,32 @@ http://127.0.0.1:7860
 
 The page starts and stops the same local runner. It is a control surface, not a remote GPU service.
 
+## First-Run Wizard
+
+The upstream CLI/GUI first-run wizard is preserved for local prototype users.
+
+This path mirrors the new first-run wizard behavior:
+
+1. Keep your source assets in `./data` (default sample workflow path).
+2. Start CLI wizard (auto camera detection + model validation + guided demo):
+
+```bash
+dot --source ./data --target 0 --wizard --show_fps
+```
+
+3. Optional: export a non-sensitive setup bundle for teammates:
+
+```bash
+dot --source ./data --target 0 --wizard --share_setup
+```
+
+4. Start GUI (`python -m dot.ui.ui`) and leave `first_run_wizard` enabled (default).
+   - Wizard preloads source from `./data`
+   - Auto-detects camera
+   - Runs a short guided demo (default frame limit)
+   - Writes local success summary to `.dot/last_success_summary.json`
+   - Optional share bundle to `.dot/share_setup.yaml`
+
 ## Check
 
 ```bash
