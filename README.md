@@ -17,9 +17,9 @@ Open:
 http://127.0.0.1:3000
 ```
 
-The web MVP supports camera capture, source upload, consent gating, and a short-export
-API contract. Paid checkout is intentionally locked until hosted inference, metering,
-retry-safe billing, and commercial rights are cleared.
+The web MVP supports camera capture, source image upload, consent gating, API-key
+billing, and a short image-export API contract. Public paid launch remains gated on
+hosted inference and commercial-rights clearance.
 
 See:
 

@@ -4,26 +4,27 @@ Morphanus should move from a local conda-based toolkit to a zero-install browser
 
 ## Decision
 
-The customer-facing product is `morphanus-web/`. The Python DOT runner remains a prototype and model lab until the hosted inference backend is ready.
+The customer-facing product is `morphanus-web/`. The Python DOT runner remains a prototype and model lab, while `api_server.py` is the local API bridge for image exports.
 
 ## Launch Gate
 
-Paid launch stays frozen until:
+Public paid launch stays frozen until:
 
 - Commercial rights are documented for every model, weight, and copied source file.
-- Hosted inference replaces the stub `/api/export` route.
+- Hosted inference is deployed behind the same `/api/export` contract.
 - Failed jobs return without consuming credits.
-- Export metering is implemented before live-session metering.
+- Export metering is validated before live-session metering.
 - The customer flow works from a clean browser without terminal setup.
 
 ## MVP Flow
 
 1. Open the web app.
-2. Upload a source image or short video.
+2. Upload a source image.
 3. Grant camera permission.
 4. Confirm consent.
-5. Create a short export.
-6. Download the result.
+5. Enter an active API key.
+6. Create an image export.
+7. Download the result.
 
 ## Native Apps
 

@@ -7,7 +7,7 @@
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

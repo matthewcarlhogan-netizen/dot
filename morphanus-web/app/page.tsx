@@ -5,8 +5,8 @@ import {
   Camera,
   CheckCircle2,
   Download,
-  FileUp,
   ImagePlus,
+  Key,
   Loader2,
   Play,
   ShieldCheck,
@@ -19,17 +19,6 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type CameraState = "idle" | "starting" | "ready" | "blocked";
 type ExportState = "idle" | "capturing" | "uploading" | "complete" | "failed";
-
-type ExportResponse = {
-  ok: boolean;
-  jobId?: string;
-  status?: string;
-  error?: string;
-  billing?: {
-    creditsConsumed: number;
-    reason: string;
-  };
-};
 
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -45,6 +34,10 @@ export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [apiKey, setApiKey] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("morphanus_api_key") ?? "" : "",
+  );
+  const [creditsRemaining, setCreditsRemaining] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -54,8 +47,26 @@ export default function Home() {
     };
   }, [sourcePreview, resultUrl]);
 
+  function handleApiKeyChange(value: string) {
+    setApiKey(value);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("morphanus_api_key", value);
+    }
+  }
+
   function handleSourceChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
+    if (file && !file.type.startsWith("image/")) {
+      setSourceFile(null);
+      setResultUrl(null);
+      setJobId(null);
+      setError("Upload an image source for this export path.");
+      if (sourcePreview) URL.revokeObjectURL(sourcePreview);
+      setSourcePreview(null);
+      event.target.value = "";
+      return;
+    }
+
     setSourceFile(file);
     setResultUrl(null);
     setJobId(null);
@@ -139,7 +150,7 @@ export default function Home() {
 
   async function createExport() {
     if (!sourceFile) {
-      setError("Upload a source image or short video first.");
+      setError("Upload a source image first.");
       return;
     }
     if (!consent) {
@@ -148,6 +159,10 @@ export default function Home() {
     }
     if (cameraState !== "ready") {
       setError("Start the camera before creating an export.");
+      return;
+    }
+    if (!apiKey) {
+      setError("Enter your API key in the sidebar to continue.");
       return;
     }
 
@@ -166,19 +181,36 @@ export default function Home() {
       form.append("source", sourceFile);
       form.append("frame", frameBlob, "camera-frame.png");
       form.append("consent", "true");
+      form.append("api_key", apiKey);
 
       const response = await fetch("/api/export", {
         method: "POST",
         body: form,
       });
-      const data = (await response.json()) as ExportResponse;
-      if (!response.ok || !data.ok) {
-        throw new Error(data.error ?? "Export failed.");
+
+      if (!response.ok) {
+        const text = await response.text();
+        let message = text || `Export failed (${response.status}).`;
+        try {
+          const data = JSON.parse(text) as { error?: string; detail?: string };
+          message = data.error ?? data.detail ?? message;
+        } catch {
+          // Keep the plain response text when the API does not return JSON.
+        }
+        throw new Error(message);
+      }
+
+      const imageBlob = await response.blob();
+      const jobIdHeader = response.headers.get("x-job-id") ?? "";
+      const creditsRemainingHeader = response.headers.get("x-credits-remaining") ?? "";
+
+      if (creditsRemainingHeader) {
+        setCreditsRemaining(creditsRemainingHeader);
       }
 
       if (resultUrl) URL.revokeObjectURL(resultUrl);
-      setResultUrl(URL.createObjectURL(frameBlob));
-      setJobId(data.jobId ?? null);
+      setResultUrl(URL.createObjectURL(imageBlob));
+      setJobId(jobIdHeader || null);
       setExportState("complete");
       setProgress(100);
     } catch (exportError) {
@@ -188,7 +220,7 @@ export default function Home() {
     }
   }
 
-  const canExport = sourceFile && consent && cameraState === "ready" && exportState !== "uploading";
+  const canExport = sourceFile && consent && cameraState === "ready" && exportState !== "uploading" && apiKey.length > 0;
   const cameraLabel =
     cameraState === "ready"
       ? "Camera ready"
@@ -228,7 +260,7 @@ export default function Home() {
             <Sparkles size={18} />
             <div>
               <strong>Export</strong>
-              <span>{exportState === "complete" ? "Ready" : "Short clip path"}</span>
+              <span>{exportState === "complete" ? "Ready" : "Image export"}</span>
             </div>
           </div>
         </div>
@@ -237,9 +269,30 @@ export default function Home() {
           <h2>Source</h2>
           <label className="file-input">
             <ImagePlus size={26} />
-            <span>{sourceFile ? sourceFile.name : "Upload image or short video"}</span>
-            <input accept="image/*,video/*" type="file" onChange={handleSourceChange} />
+            <span>{sourceFile ? sourceFile.name : "Upload source image"}</span>
+            <input accept="image/*" type="file" onChange={handleSourceChange} />
           </label>
+        </section>
+
+        <section className="control-group">
+          <h2>API Key</h2>
+          <label className="file-input" style={{ padding: "6px 10px", gridTemplateColumns: "1fr" }}>
+            <Key size={16} style={{ position: "absolute", margin: "6px 0 0 4px", opacity: 0.5 }} />
+            <input
+              value={apiKey}
+              onChange={(e) => handleApiKeyChange(e.target.value)}
+              placeholder="DOT-XXXXX-XXXXX-XXXXX"
+              style={{
+                width: "100%", background: "transparent", border: "none",
+                color: "inherit", font: "inherit", paddingLeft: 22,
+              }}
+            />
+          </label>
+          {creditsRemaining && (
+            <span className="small-copy" style={{ marginTop: 4, display: "block" }}>
+              Credits remaining: {creditsRemaining}
+            </span>
+          )}
         </section>
 
         <section className="control-group">
@@ -251,10 +304,6 @@ export default function Home() {
             </span>
           </label>
         </section>
-
-        <div className="notice">
-          Paid checkout is locked until rights clearance, hosted inference, metering, and retry-safe billing.
-        </div>
       </aside>
 
       <section className="canvas-stage" aria-label="Preview workspace">
@@ -265,7 +314,7 @@ export default function Home() {
           </span>
           <span className="status-pill">
             <ShieldCheck size={15} />
-            Credits consumed: 0
+            {creditsRemaining !== null ? `Credits: ${creditsRemaining}` : "Commerce enabled"}
           </span>
         </div>
 
@@ -281,7 +330,7 @@ export default function Home() {
           )}
           {sourcePreview && (
             <div className="source-chip">
-              {sourceFile?.type.startsWith("image/") ? <img alt="" src={sourcePreview} /> : <FileUp size={28} />}
+              <img alt="" src={sourcePreview} />
               <span>{sourceFile?.name}</span>
             </div>
           )}
@@ -313,9 +362,9 @@ export default function Home() {
           <span className="status-copy">
             {exportState === "idle" && "Waiting for source, consent, and camera."}
             {exportState === "capturing" && "Capturing browser preview."}
-            {exportState === "uploading" && "Creating hosted-inference job."}
+            {exportState === "uploading" && "Swapping face via ONNX inference."}
             {exportState === "complete" && "Export ready."}
-            {exportState === "failed" && "Export failed without consuming credits."}
+            {exportState === "failed" && "Export failed."}
           </span>
           <div className="meter" aria-hidden="true">
             <span style={{ width: `${progress}%` }} />
@@ -342,10 +391,9 @@ export default function Home() {
         )}
 
         <div className="panel-card">
-          <strong>Backend contract</strong>
+          <strong>Backend</strong>
           <span className="status-copy">
-            The UI posts source, frame, and consent to <code>/api/export</code>. Replace the stub with GPU
-            inference without changing the browser flow.
+            Live ONNX inswapper inference with API key billing. Credits deducted per export.
           </span>
         </div>
       </aside>

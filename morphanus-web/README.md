@@ -15,18 +15,19 @@ Open `http://127.0.0.1:3000`.
 ## Current Scope
 
 - Browser camera capture through `getUserMedia`.
-- Source upload for image or short video.
+- Source image upload for the current export path.
 - Explicit consent gate before export.
-- Short-export API contract at `/api/export`.
-- Demo export result with zero credits consumed.
-- Paid checkout intentionally locked until commercial rights, hosted inference, metering, and retry-safe billing are implemented.
+- API-key-gated export through `/api/export`.
+- Local ONNX inswapper inference through `MORPHANUS_API_URL` or `http://127.0.0.1:8000`.
+- Credits are deducted only after a successful generated image response.
 
 ## Backend Contract
 
 `POST /api/export` accepts multipart form data:
 
-- `source`: uploaded image or video file.
+- `source`: uploaded image file.
 - `frame`: captured browser preview frame.
 - `consent`: must be `true`.
+- `api_key`: active Morphanus API key.
 
-The route currently returns a completed stub job. Replace it with hosted GPU orchestration when the model stack is commercially cleared.
+The route proxies to `POST /api/v1/swap` on the Python API server and returns a PNG plus credit headers.

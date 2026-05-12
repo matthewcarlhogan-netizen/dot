@@ -2,8 +2,17 @@
 data/results/*
 saved_models/*
 *.patch
+out/*
+uploads/*
+.morphanus-runtime/
+morphanus-web/.vercel/
 morphanus-web/.next/
 morphanus-web/node_modules/
+test_output.png
+vps_portal/audit_log.jsonl
+vps_portal/keys.json
+vps_portal/subscriptions.json
+vps_portal/.billing.lock
 
 # Created by https://www.toptal.com/developers/gitignore/api/python,macos,windows,linux
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,macos,windows,linux
