@@ -1,0 +1,7 @@
+component,path_or_identifier,origin,license,commercial_use_allowed,redistribution_allowed,attribution_required,status,paid_path_required,proof_or_notes
+Repo root license,LICENSE,Local repository,BSD-3-Clause,yes,yes,yes,approved,no,Repository declared BSD 3-Clause.
+SimSwap networks source,src/dot/simswap/models/fs_networks.py,SimSwap upstream,CC-BY-NC-SA-4.0,no,unknown,yes,blocked,no,Explicit CC BY-NC-SA notice; isolated to research path only.
+SimSwap 512 networks source,src/dot/simswap/models/fs_networks_512.py,SimSwap upstream,CC-BY-NC-SA-4.0,no,unknown,yes,blocked,no,Explicit CC BY-NC-SA notice; isolated to research path only.
+ONNX inswapper model,saved_models/onnx/inswapper_128_fp16.onnx,External model source,TBD,unknown,unknown,unknown,pending,no,Research mode only; not in paid path.
+ArcFace checkpoint,saved_models/simswap/arcface_model/arcface_checkpoint.tar,External model source,TBD,unknown,unknown,unknown,pending,no,Research mode only; not in paid path.
+Commercial inference provider endpoint,MORPHANUS_COMMERCIAL_BACKEND_URL,Selected commercial vendor,TBD,unknown,unknown,unknown,pending,yes,Required paid path dependency; add signed commercial terms and service agreement reference.

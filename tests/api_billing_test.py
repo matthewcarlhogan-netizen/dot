@@ -107,6 +107,25 @@ def test_no_credits_returns_402(billing_dir):
     assert uses_remaining(billing_dir, "DOT-EMPTY") == 0
 
 
+def test_paid_mode_blocks_nc_backend_without_deduct(billing_dir, monkeypatch):
+    monkeypatch.setenv("MORPHANUS_PAID_MODE", "1")
+    monkeypatch.setenv("MORPHANUS_INFERENCE_MODE", "research_nc")
+    with pytest.raises(HTTPException) as exc:
+        run_swap()
+    assert exc.value.status_code == 503
+    assert uses_remaining(billing_dir) == 2
+
+
+def test_paid_mode_allows_commercial_mode_and_deducts(billing_dir, monkeypatch):
+    monkeypatch.setenv("MORPHANUS_PAID_MODE", "1")
+    monkeypatch.setenv("MORPHANUS_INFERENCE_MODE", "commercial_external")
+    monkeypatch.setattr(api_server, "get_backend", lambda: FakeBackend())
+    response = run_swap()
+    assert response.status_code == 200
+    assert response.headers["x-credits-consumed"] == "1"
+    assert uses_remaining(billing_dir) == 1
+
+
 def test_oversized_source_does_not_deduct(billing_dir):
     with pytest.raises(HTTPException) as exc:
         run_swap(source=b"x" * (25 * 1024 * 1024 + 1))

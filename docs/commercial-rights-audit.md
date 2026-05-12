@@ -18,3 +18,14 @@ Do not sell packaged builds, hosted inference, use packs, or subscriptions until
 - Record license, origin, commercial permission, attribution requirements, and redistribution permission.
 - Replace any non-commercial component in the paid path.
 - Keep proof beside the release artifact.
+
+## Enforcement
+
+Use the machine gate before any paid release:
+
+```bash
+python scripts/check_commercial_gate.py
+```
+
+The command reads `docs/license-manifest.csv` and fails if any component is blocked,
+pending, or unknown for commercial rights in the paid path (`paid_path_required=yes`).

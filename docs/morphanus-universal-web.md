@@ -15,6 +15,7 @@ Public paid launch stays frozen until:
 - Failed jobs return without consuming credits.
 - Export metering is validated before live-session metering.
 - The customer flow works from a clean browser without terminal setup.
+- API paid mode is enabled only with `MORPHANUS_INFERENCE_MODE=commercial_external`.
 
 ## MVP Flow
 

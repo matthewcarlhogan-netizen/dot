@@ -21,6 +21,11 @@ The web MVP supports camera capture, source image upload, consent gating, API-ke
 billing, and a short image-export API contract. Public paid launch remains gated on
 hosted inference and commercial-rights clearance.
 
+Paid-mode guardrails in `api_server.py`:
+
+- `MORPHANUS_PAID_MODE=1` blocks non-commercial research inference modes.
+- Paid deployments must run `MORPHANUS_INFERENCE_MODE=commercial_external`.
+
 See:
 
 - `docs/morphanus-universal-web.md`
@@ -102,6 +107,7 @@ bash -n run.sh
 conda run -n dot python -m compileall -q live.py health_check.py download_models.py src/dot
 conda run -n dot python -m pytest -q
 conda run -n dot python health_check.py
+python scripts/check_commercial_gate.py
 ./run.sh --help
 ```
 

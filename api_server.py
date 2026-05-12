@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Optional
+from typing import Optional, Protocol
 
 import cv2
 import numpy as np
@@ -41,7 +41,42 @@ app.add_middleware(
 
 VPS_DIR = ROOT / "vps_portal"
 
-_backend: Optional["InferenceBackend"] = None
+class BackendProtocol(Protocol):
+    _loaded: bool
+
+    def load(self) -> None: ...
+
+    def _prepare_source(self, image_bytes: bytes) -> np.ndarray: ...
+
+    def _swap_target(self, image_bytes: bytes, source_embedding: np.ndarray) -> bytes: ...
+
+
+_backend: Optional[BackendProtocol] = None
+
+
+def _truthy_env(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _inference_mode() -> str:
+    # research_nc: existing local research backend (may include non-commercial components)
+    # commercial_external: paid-safe placeholder; wire to commercially cleared provider
+    return os.getenv("MORPHANUS_INFERENCE_MODE", "research_nc").strip().lower()
+
+
+def _paid_mode() -> bool:
+    return _truthy_env("MORPHANUS_PAID_MODE", "0")
+
+
+def _enforce_paid_inference_mode() -> None:
+    if _paid_mode() and _inference_mode() != "commercial_external":
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Paid mode requires MORPHANUS_INFERENCE_MODE=commercial_external. "
+                "Current mode is non-commercial research backend."
+            ),
+        )
 
 
 @contextmanager
@@ -290,10 +325,60 @@ class InferenceBackend:
         return encoded.tobytes()
 
 
-def get_backend() -> InferenceBackend:
+class ExternalInferenceBackend:
+    """Commercial backend bridge that avoids local NC model imports."""
+
+    def __init__(self):
+        self._loaded = False
+        self.base_url = os.getenv("MORPHANUS_COMMERCIAL_BACKEND_URL", "").strip().rstrip("/")
+        self.api_key = os.getenv("MORPHANUS_COMMERCIAL_BACKEND_KEY", "").strip()
+        self._last_source = b""
+
+    def load(self):
+        if not self.base_url:
+            raise RuntimeError(
+                "MORPHANUS_COMMERCIAL_BACKEND_URL is required when "
+                "MORPHANUS_INFERENCE_MODE=commercial_external"
+            )
+        self._loaded = True
+
+    def _prepare_source(self, image_bytes: bytes) -> np.ndarray:
+        # The external backend receives raw source/target bytes together.
+        self._last_source = image_bytes
+        return np.zeros((1, 1), dtype=np.float32)
+
+    def _swap_target(self, image_bytes: bytes, _source_embedding: np.ndarray) -> bytes:
+        import requests
+
+        files = {
+            "source": ("source.jpg", self._last_source, "image/jpeg"),
+            "target": ("target.png", image_bytes, "image/png"),
+        }
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        response = requests.post(
+            f"{self.base_url}/swap",
+            files=files,
+            headers=headers,
+            timeout=45,
+        )
+        if response.status_code >= 400:
+            detail = response.text.strip() or "Commercial inference provider rejected request."
+            raise HTTPException(status_code=502, detail=detail)
+        return response.content
+
+
+def get_backend() -> BackendProtocol:
     global _backend
     if _backend is None:
-        _backend = InferenceBackend()
+        mode = _inference_mode()
+        if mode == "research_nc":
+            _backend = InferenceBackend()
+        elif mode == "commercial_external":
+            _backend = ExternalInferenceBackend()
+        else:
+            raise RuntimeError(f"Unknown MORPHANUS_INFERENCE_MODE: {mode}")
     return _backend
 
 
@@ -314,11 +399,19 @@ async def health():
     loaded = b is not None and b._loaded
     keys = _load_keys()
     active_keys = sum(1 for k in keys.values() if k.get("active"))
+    mode = _inference_mode()
+    paid_mode = _paid_mode()
     return {
         "ok": True,
         "product": "morphanus-api",
-        "commerceEnabled": True,
-        "inference": {"status": "ready" if loaded else "loading", "backend": "onnx-inswapper", "device": get_device()},
+        "commerceEnabled": paid_mode and mode == "commercial_external",
+        "inference": {
+            "status": "ready" if loaded else "loading",
+            "backend": "onnx-inswapper" if mode == "research_nc" else mode,
+            "device": get_device(),
+            "mode": mode,
+            "paidMode": paid_mode,
+        },
         "accounts": {"totalKeys": len(keys), "activeKeys": active_keys},
     }
 
@@ -327,6 +420,7 @@ async def health():
 async def swap(source: UploadFile = File(...), target: UploadFile = File(...), api_key: str = Form(...)):
     import traceback
     try:
+        _enforce_paid_inference_mode()
         _validate_key(api_key)
 
         source_bytes = await source.read()
