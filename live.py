@@ -32,6 +32,7 @@ WINDOW_NAME = "DOT - Live Deepfake"
 
 sys.path.insert(0, str(ROOT / "src"))
 
+from runtime_guard import warn_nested_checkout  # noqa: E402
 from dot.commons.utils import get_device  # noqa: E402
 from dot.simswap import SimswapOption  # noqa: E402
 from dot.simswap.fs_model import legacy_simswap_import_path  # noqa: E402
@@ -95,6 +96,11 @@ def open_camera(camera_id: int, width: int, height: int) -> cv2.VideoCapture:
             "using the camera and rerun."
         )
     return cap
+
+
+def reopen_camera(camera_id: int, width: int, height: int) -> cv2.VideoCapture:
+    print(f"[dot] Attempting to reopen camera {camera_id} ...")
+    return open_camera(camera_id, width, height)
 
 
 def draw_fps(frame, fps: float):
@@ -460,6 +466,7 @@ def parse_args():
 
 def main() -> int:
     args = parse_args()
+    warn_nested_checkout(ROOT)
     source = Path(args.source)
     if not source.exists():
         print(f"Source not found: {source}", file=sys.stderr)
@@ -502,17 +509,37 @@ def main() -> int:
         last = time.monotonic()
         fps = 0.0
         failed_reads = 0
+        processing_failures = 0
+        reopen_attempted = False
         while True:
             ok, frame = cap.read()
             if not ok or frame is None:
                 failed_reads += 1
                 if failed_reads > 30:
-                    raise RuntimeError("Camera stopped returning frames.")
+                    if reopen_attempted:
+                        raise RuntimeError("Camera stopped returning frames after recovery attempt.")
+                    cap.release()
+                    cap = reopen_camera(args.camera, args.width, args.height)
+                    failed_reads = 0
+                    reopen_attempted = True
+                    continue
                 time.sleep(0.03)
                 continue
             failed_reads = 0
+            reopen_attempted = False
             frame = cv2.flip(frame, 1)
-            swapped = np.ascontiguousarray(backend.process(frame))
+            try:
+                swapped = np.ascontiguousarray(backend.process(frame))
+                processing_failures = 0
+            except Exception as exc:
+                processing_failures += 1
+                if args.debug:
+                    print(f"[dot] Frame processing error ({processing_failures}/5): {exc}", file=sys.stderr)
+                if processing_failures >= 5:
+                    raise RuntimeError(
+                        f"Backend failed for {processing_failures} consecutive frames."
+                    ) from exc
+                swapped = frame
 
             now = time.monotonic()
             elapsed = max(now - last, 1e-6)

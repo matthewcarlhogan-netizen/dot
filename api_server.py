@@ -29,6 +29,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from runtime_guard import warn_nested_checkout  # noqa: E402
 from dot.commons.utils import get_device  # noqa: E402
 
 app = FastAPI(title="Morphanus API", version="0.1.0")
@@ -385,6 +386,7 @@ def get_backend() -> BackendProtocol:
 @app.on_event("startup")
 async def startup():
     import torch as _torch_module
+    warn_nested_checkout(ROOT)
     print(f"[api] Device: {get_device()}")
     try:
         get_backend().load()
