@@ -8,6 +8,7 @@ Output: OpenCV window by default, optional Python virtual camera.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import platform
 import sys
@@ -49,6 +50,7 @@ PRESETS: dict[PresetName, Path] = {
     "natural": ROOT / "configs" / "m2_8gb_natural.yaml",
     "natural-max": ROOT / "configs" / "m2_8gb_natural_max.yaml",
 }
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 
 def load_config(path: Path) -> dict:
@@ -111,7 +113,7 @@ def draw_fps(frame, fps: float):
 
 
 def read_source_frame(path: Path) -> np.ndarray:
-    if path.suffix.lower() in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
+    if path.suffix.lower() in VIDEO_EXTENSIONS:
         cap = cv2.VideoCapture(str(path))
         try:
             ok, frame = cap.read()
@@ -125,6 +127,66 @@ def read_source_frame(path: Path) -> np.ndarray:
     if frame is None:
         raise RuntimeError(f"Cannot read source image: {path}")
     return frame
+
+
+def pick_source_frame_with_face(source: Path, size: int = 256, max_frames: int = 120, stride: int = 3) -> np.ndarray:
+    if source.suffix.lower() not in VIDEO_EXTENSIONS:
+        return read_source_frame(source)
+
+    detector = FaceMesh(
+        static_image_mode=True,
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=0.5,
+        mode="None",
+    )
+    cap = cv2.VideoCapture(str(source))
+    fallback = None
+    try:
+        idx = 0
+        while idx < max_frames:
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            if fallback is None:
+                fallback = frame
+            if idx % stride == 0 and detector.get(frame, size) is not None:
+                return frame
+            idx += 1
+    finally:
+        cap.release()
+    if fallback is not None:
+        return fallback
+    raise RuntimeError(f"Cannot read a frame from source video: {source}")
+
+
+def detect_source_face(
+    frame: np.ndarray,
+    size: int = 256,
+    detection_threshold: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray]:
+    detector = FaceMesh(
+        static_image_mode=True,
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=detection_threshold,
+        mode="None",
+    )
+    result = detector.get(frame, size)
+    if result is None:
+        raise RuntimeError("No face detected in selected source frame.")
+    crops, matrices = result
+    return crops[0], matrices[0]
+
+
+def load_source_face_crop(
+    source: Path,
+    size: int = 256,
+    detection_threshold: float = 0.5,
+) -> np.ndarray:
+    frame = pick_source_frame_with_face(source, size=size)
+    crop, _ = detect_source_face(frame, size=size, detection_threshold=detection_threshold)
+    return crop
 
 
 def prepare_source_crop(crop: np.ndarray) -> np.ndarray:
@@ -151,22 +213,32 @@ def arcface_embedding(net_arc, crop_bgr: np.ndarray, device: str) -> np.ndarray:
 
 
 def prepare_source_file(source: Path, output: Path, size: int = 256) -> Path:
-    frame = read_source_frame(source)
-    detector = FaceMesh(
-        static_image_mode=True,
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5,
-        mode="None",
-    )
-    result = detector.get(frame, size)
-    if result is None:
-        raise RuntimeError(f"No face detected in source: {source}")
-    crop = prepare_source_crop(result[0][0])
+    try:
+        crop = load_source_face_crop(source, size=size, detection_threshold=0.5)
+    except RuntimeError as exc:
+        raise RuntimeError(f"No face detected in source: {source}") from exc
+    crop = prepare_source_crop(crop)
     output.parent.mkdir(parents=True, exist_ok=True)
     if not cv2.imwrite(str(output), crop):
         raise RuntimeError(f"Could not write prepared source: {output}")
     return output
+
+
+def prepared_source_cache_path(source: Path, cache_dir: Path) -> Path:
+    stat = source.stat()
+    key = f"{source.resolve()}::{stat.st_mtime_ns}::{stat.st_size}"
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    return cache_dir / f"{source.stem}-{digest}.png"
+
+
+def resolve_source_for_backend(source: Path, prepare_source: bool, cache_dir: Path) -> Path:
+    if not prepare_source:
+        return source
+    out = prepared_source_cache_path(source, cache_dir)
+    if out.exists():
+        return out
+    print(f"[dot] Preparing source identity: {source}")
+    return prepare_source_file(source, out)
 
 
 def soft_paste(frame: np.ndarray, patch: np.ndarray, matrix: np.ndarray, blur: int = 21) -> np.ndarray:
@@ -325,20 +397,13 @@ class OnnxBackend:
         self.session = ort.InferenceSession(str(self.model_path), providers=providers)
         print(f"[dot] ONNX providers: {', '.join(self.session.get_providers())}")
 
-        source_frame = read_source_frame(source)
-        detector = FaceMesh(
-            static_image_mode=True,
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=float(self.config.get("detection_threshold", 0.55)),
-            mode="None",
-        )
-        result = detector.get(source_frame, 128)
-        if result is None:
-            raise RuntimeError(f"No face detected in source for ONNX backend: {source}")
-
         print("[dot] Preparing source crop and extracting ONNX identity ...")
-        source_crop = result[0][0]
+        detection_threshold = float(self.config.get("detection_threshold", 0.55))
+        source_crop = load_source_face_crop(
+            source=source,
+            size=128,
+            detection_threshold=detection_threshold,
+        )
         net_arc = self._load_arcface()
         embedding = arcface_embedding(net_arc, source_crop, get_device())
         del net_arc
@@ -386,12 +451,12 @@ class AvatarBackend:
         self.skin_tint = np.array([170, 190, 220], dtype=np.float32)
 
     def load(self, source: Path):
-        frame = read_source_frame(source)
-        detector = FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True, mode="None")
-        result = detector.get(frame, 256)
-        if result is not None:
-            crop = prepare_source_crop(result[0][0])
+        detection_threshold = float(self.config.get("detection_threshold", 0.55))
+        try:
+            crop = load_source_face_crop(source=source, size=256, detection_threshold=detection_threshold)
             self.skin_tint = crop.reshape(-1, 3).mean(axis=0).astype(np.float32)
+        except RuntimeError:
+            pass
         print("[dot] Avatar style ready.")
 
     def _enlarge_region(self, image: np.ndarray, center: tuple[int, int], radius: int, strength: float) -> np.ndarray:
@@ -459,6 +524,8 @@ def parse_args():
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--prepare-source", help="write an aligned, lighting-normalized source image and exit")
+    parser.add_argument("--no-source-prepare", action="store_true", help="disable source face preparation/cache")
+    parser.add_argument("--source-cache-dir", default=str(ROOT / ".cache" / "prepared_sources"))
     parser.add_argument("--no-fps", action="store_true")
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
@@ -498,8 +565,15 @@ def main() -> int:
         if args.output in {"virtualcam", "both"}:
             virtualcam = VirtualCameraSink(args.width, args.height)
 
+        prepared_source = resolve_source_for_backend(
+            source=source,
+            prepare_source=not args.no_source_prepare,
+            cache_dir=Path(args.source_cache_dir),
+        )
+        print(f"  Engine : source={prepared_source}")
+
         backend = make_backend(args.backend, args.style, config)
-        backend.load(source)
+        backend.load(prepared_source)
         cap = open_camera(args.camera, args.width, args.height)
 
         if show_window:

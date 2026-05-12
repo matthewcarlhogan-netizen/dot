@@ -5,6 +5,7 @@ import {
   Camera,
   CheckCircle2,
   Download,
+  RefreshCw,
   ImagePlus,
   Key,
   Loader2,
@@ -20,6 +21,18 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 type CameraState = "idle" | "starting" | "ready" | "blocked";
 type ExportState = "idle" | "capturing" | "uploading" | "complete" | "failed";
 
+function cameraPreferenceScore(label: string): number {
+  const normalized = label.toLowerCase();
+  let score = 0;
+  if (normalized.includes("front")) score += 5;
+  if (normalized.includes("user")) score += 4;
+  if (normalized.includes("facetime")) score += 3;
+  if (normalized.includes("selfie")) score += 3;
+  if (normalized.includes("back")) score -= 2;
+  if (normalized.includes("rear")) score -= 2;
+  return score;
+}
+
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -34,10 +47,37 @@ export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
   const [apiKey, setApiKey] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("morphanus_api_key") ?? "" : "",
   );
   const [creditsRemaining, setCreditsRemaining] = useState<string | null>(null);
+
+  async function refreshVideoDevices(preferredDeviceId?: string) {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return;
+    }
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+      (device) => device.kind === "videoinput",
+    );
+    setVideoDevices(devices);
+    setSelectedDeviceId((previous) => {
+      if (preferredDeviceId && devices.some((device) => device.deviceId === preferredDeviceId)) {
+        return preferredDeviceId;
+      }
+      if (previous && devices.some((device) => device.deviceId === previous)) {
+        return previous;
+      }
+      if (!devices.length) {
+        return "";
+      }
+      const ranked = [...devices].sort(
+        (a, b) => cameraPreferenceScore(b.label) - cameraPreferenceScore(a.label),
+      );
+      return ranked[0].deviceId;
+    });
+  }
 
   useEffect(() => {
     return () => {
@@ -46,6 +86,20 @@ export default function Home() {
       if (resultUrl) URL.revokeObjectURL(resultUrl);
     };
   }, [sourcePreview, resultUrl]);
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return;
+    }
+    const refresh = () => {
+      void refreshVideoDevices();
+    };
+    refresh();
+    navigator.mediaDevices.addEventListener?.("devicechange", refresh);
+    return () => {
+      navigator.mediaDevices.removeEventListener?.("devicechange", refresh);
+    };
+  }, []);
 
   function handleApiKeyChange(value: string) {
     setApiKey(value);
@@ -76,27 +130,61 @@ export default function Home() {
     setSourcePreview(file ? URL.createObjectURL(file) : null);
   }
 
-  async function startCamera() {
+  async function startCamera(deviceIdOverride?: string) {
     setError(null);
     setCameraState("starting");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+    const requestedDeviceId = deviceIdOverride ?? selectedDeviceId;
+    const attempts: MediaStreamConstraints[] = [];
+    if (requestedDeviceId) {
+      attempts.push({
         audio: false,
         video: {
+          deviceId: { exact: requestedDeviceId },
           width: { ideal: 1280 },
           height: { ideal: 720 },
-          facingMode: "user",
         },
       });
+    }
+    attempts.push({
+      audio: false,
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        facingMode: { ideal: "user" },
+      },
+    });
+    attempts.push({ audio: false, video: { facingMode: "user" } });
+    attempts.push({ audio: false, video: true });
+
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+
+    let stream: MediaStream | null = null;
+    let cameraError: unknown = null;
+    try {
+      for (const constraints of attempts) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          break;
+        } catch (error) {
+          cameraError = error;
+        }
+      }
+      if (!stream) {
+        throw cameraError ?? new Error("Camera permission failed.");
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
+      const activeDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId;
+      await refreshVideoDevices(activeDeviceId);
       setCameraState("ready");
-    } catch (cameraError) {
+    } catch (error) {
       setCameraState("blocked");
-      setError(cameraError instanceof Error ? cameraError.message : "Camera permission failed.");
+      setError(error instanceof Error ? error.message : "Camera permission failed.");
     }
   }
 
@@ -105,6 +193,18 @@ export default function Home() {
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraState("idle");
+  }
+
+  async function switchCamera() {
+    if (videoDevices.length < 2) {
+      setError("No alternate front camera was detected on this device.");
+      return;
+    }
+    const currentIndex = videoDevices.findIndex((device) => device.deviceId === selectedDeviceId);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % videoDevices.length : 0;
+    const next = videoDevices[nextIndex];
+    setSelectedDeviceId(next.deviceId);
+    await startCamera(next.deviceId);
   }
 
   function drawProcessedFrame(): Promise<Blob> {
@@ -229,6 +329,9 @@ export default function Home() {
         : cameraState === "blocked"
           ? "Camera blocked"
           : "Camera idle";
+  const selectedCameraLabel =
+    videoDevices.find((device) => device.deviceId === selectedDeviceId)?.label ||
+    (videoDevices.length ? "Front camera selected" : "Camera auto-select");
 
   return (
     <main className="app-shell">
@@ -254,6 +357,7 @@ export default function Home() {
             <div>
               <strong>Camera</strong>
               <span>{cameraLabel}</span>
+              <span>{selectedCameraLabel}</span>
             </div>
           </div>
           <div className="step">
@@ -293,6 +397,33 @@ export default function Home() {
               Credits remaining: {creditsRemaining}
             </span>
           )}
+        </section>
+
+        <section className="control-group">
+          <h2>Camera</h2>
+          <label className="small-copy" style={{ display: "grid", gap: 8 }}>
+            <span>Preferred front camera</span>
+            <select
+              value={selectedDeviceId}
+              onChange={(event) => setSelectedDeviceId(event.target.value)}
+              style={{
+                width: "100%",
+                minHeight: 40,
+                borderRadius: 7,
+                border: "1px solid var(--line)",
+                background: "var(--panel-strong)",
+                color: "var(--text)",
+                padding: "0 10px",
+              }}
+            >
+              {!videoDevices.length && <option value="">Auto-select camera</option>}
+              {videoDevices.map((device, index) => (
+                <option key={device.deviceId || `video-${index}`} value={device.deviceId}>
+                  {device.label || `Camera ${index + 1}`}
+                </option>
+              ))}
+            </select>
+          </label>
         </section>
 
         <section className="control-group">
@@ -343,7 +474,14 @@ export default function Home() {
               Stop
             </button>
           ) : (
-            <button className="secondary" disabled={cameraState === "starting"} onClick={startCamera} type="button">
+            <button
+              className="secondary"
+              disabled={cameraState === "starting"}
+              onClick={() => {
+                void startCamera();
+              }}
+              type="button"
+            >
               {cameraState === "starting" ? <Loader2 size={17} /> : <Play size={17} />}
               Start camera
             </button>
@@ -351,6 +489,16 @@ export default function Home() {
           <button className="primary" disabled={!canExport} onClick={createExport} type="button">
             {exportState === "uploading" || exportState === "capturing" ? <Loader2 size={17} /> : <Sparkles size={17} />}
             Create export
+          </button>
+          <button
+            className="secondary"
+            onClick={() => {
+              void switchCamera();
+            }}
+            type="button"
+          >
+            <RefreshCw size={17} />
+            Switch camera
           </button>
         </div>
       </section>

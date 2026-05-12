@@ -15,7 +15,9 @@ Public paid launch stays frozen until:
 - Failed jobs return without consuming credits.
 - Export metering is validated before live-session metering.
 - The customer flow works from a clean browser without terminal setup.
-- API paid mode is enabled only with `MORPHANUS_INFERENCE_MODE=commercial_external`.
+- API paid mode is enabled only with:
+  - `MORPHANUS_INFERENCE_MODE=commercial_inhouse` (self-hosted)
+  - or `MORPHANUS_INFERENCE_MODE=commercial_external`.
 
 ## MVP Flow
 
@@ -26,6 +28,13 @@ Public paid launch stays frozen until:
 5. Enter an active API key.
 6. Create an image export.
 7. Download the result.
+
+## Mobile Camera Support
+
+- Web flow uses `getUserMedia` with front-camera preference.
+- Device fallback is automatic when strict front-camera selection fails.
+- Customers can switch between available cameras in-app without leaving the page.
+- For phones, host over HTTPS (or localhost during development) to allow camera access.
 
 ## Native Apps
 

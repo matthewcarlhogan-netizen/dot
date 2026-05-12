@@ -61,7 +61,8 @@ def _truthy_env(name: str, default: str = "0") -> bool:
 
 def _inference_mode() -> str:
     # research_nc: existing local research backend (may include non-commercial components)
-    # commercial_external: paid-safe placeholder; wire to commercially cleared provider
+    # commercial_external: paid-safe provider path
+    # commercial_inhouse: paid in-house hosted inference path
     return os.getenv("MORPHANUS_INFERENCE_MODE", "research_nc").strip().lower()
 
 
@@ -70,12 +71,12 @@ def _paid_mode() -> bool:
 
 
 def _enforce_paid_inference_mode() -> None:
-    if _paid_mode() and _inference_mode() != "commercial_external":
+    if _paid_mode() and _inference_mode() not in {"commercial_external", "commercial_inhouse"}:
         raise HTTPException(
             status_code=503,
             detail=(
-                "Paid mode requires MORPHANUS_INFERENCE_MODE=commercial_external. "
-                "Current mode is non-commercial research backend."
+                "Paid mode requires MORPHANUS_INFERENCE_MODE in "
+                "{commercial_external, commercial_inhouse}. Current mode is non-commercial research backend."
             ),
         )
 
@@ -376,6 +377,8 @@ def get_backend() -> BackendProtocol:
         mode = _inference_mode()
         if mode == "research_nc":
             _backend = InferenceBackend()
+        elif mode == "commercial_inhouse":
+            _backend = InferenceBackend()
         elif mode == "commercial_external":
             _backend = ExternalInferenceBackend()
         else:
@@ -403,13 +406,20 @@ async def health():
     active_keys = sum(1 for k in keys.values() if k.get("active"))
     mode = _inference_mode()
     paid_mode = _paid_mode()
+    backend_name = (
+        "onnx-inswapper"
+        if mode == "research_nc"
+        else "inhouse-onnx"
+        if mode == "commercial_inhouse"
+        else mode
+    )
     return {
         "ok": True,
         "product": "morphanus-api",
-        "commerceEnabled": paid_mode and mode == "commercial_external",
+        "commerceEnabled": paid_mode and mode in {"commercial_external", "commercial_inhouse"},
         "inference": {
             "status": "ready" if loaded else "loading",
-            "backend": "onnx-inswapper" if mode == "research_nc" else mode,
+            "backend": backend_name,
             "device": get_device(),
             "mode": mode,
             "paidMode": paid_mode,

@@ -24,7 +24,9 @@ hosted inference and commercial-rights clearance.
 Paid-mode guardrails in `api_server.py`:
 
 - `MORPHANUS_PAID_MODE=1` blocks non-commercial research inference modes.
-- Paid deployments must run `MORPHANUS_INFERENCE_MODE=commercial_external`.
+- Paid deployments must run one of:
+  - `MORPHANUS_INFERENCE_MODE=commercial_inhouse` (self-hosted in-house inference)
+  - `MORPHANUS_INFERENCE_MODE=commercial_external` (commercial provider)
 
 See:
 

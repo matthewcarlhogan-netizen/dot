@@ -14,12 +14,13 @@ Open `http://127.0.0.1:3000`.
 
 ## Current Scope
 
-- Browser camera capture through `getUserMedia`.
+- Browser camera capture through `getUserMedia` with front-camera preference and fallback.
 - Source image upload for the current export path.
 - Explicit consent gate before export.
 - API-key-gated export through `/api/export`.
 - Local ONNX inswapper inference through `MORPHANUS_API_URL` or `http://127.0.0.1:8000`.
 - Credits are deducted only after a successful generated image response.
+- Camera switch control for multi-camera mobile devices.
 
 ## Backend Contract
 
