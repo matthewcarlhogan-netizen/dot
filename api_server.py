@@ -49,7 +49,7 @@ class BackendProtocol(Protocol):
 
     def _prepare_source(self, image_bytes: bytes) -> np.ndarray: ...
 
-    def _swap_target(self, image_bytes: bytes, source_embedding: np.ndarray) -> bytes: ...
+    def _swap_target(self, image_bytes: bytes, source_embedding: np.ndarray, source_bytes: bytes) -> bytes: ...
 
 
 _backend: Optional[BackendProtocol] = None
@@ -334,7 +334,6 @@ class ExternalInferenceBackend:
         self._loaded = False
         self.base_url = os.getenv("MORPHANUS_COMMERCIAL_BACKEND_URL", "").strip().rstrip("/")
         self.api_key = os.getenv("MORPHANUS_COMMERCIAL_BACKEND_KEY", "").strip()
-        self._last_source = b""
 
     def load(self):
         if not self.base_url:
@@ -345,15 +344,15 @@ class ExternalInferenceBackend:
         self._loaded = True
 
     def _prepare_source(self, image_bytes: bytes) -> np.ndarray:
-        # The external backend receives raw source/target bytes together.
-        self._last_source = image_bytes
+        # Store source bytes for use in _swap_target (request-scoped, not shared)
+        self._source_bytes = image_bytes
         return np.zeros((1, 1), dtype=np.float32)
 
-    def _swap_target(self, image_bytes: bytes, _source_embedding: np.ndarray) -> bytes:
+    def _swap_target(self, image_bytes: bytes, _source_embedding: np.ndarray, source_bytes: bytes) -> bytes:
         import requests
 
         files = {
-            "source": ("source.jpg", self._last_source, "image/jpeg"),
+            "source": ("source.jpg", source_bytes, "image/jpeg"),
             "target": ("target.png", image_bytes, "image/png"),
         }
         headers = {}
@@ -448,7 +447,7 @@ async def swap(source: UploadFile = File(...), target: UploadFile = File(...), a
 
         job_id = f"mw_{int(time.time() * 1000):x}_{uuid.uuid4().hex[:6]}"
         source_embedding = backend._prepare_source(source_bytes)
-        result_bytes = backend._swap_target(target_bytes, source_embedding)
+        result_bytes = backend._swap_target(target_bytes, source_embedding, source_bytes)
         entry = _deduct_credit(api_key)
 
         _log_audit({

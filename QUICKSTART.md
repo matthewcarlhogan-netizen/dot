@@ -18,13 +18,19 @@ Paid checkout is locked until hosted inference, metering, and commercial rights 
 
 ```bash
 cd /Users/matt/dot
-./run.sh --source data/source_face.webm --camera 1 --preset natural
+./run.sh --source data/source_face.webm --camera 1
 ```
 
 Quit with `q`, Esc, or Ctrl-C.
 
-Optional virtual camera:
+Optional window size:
 
 ```bash
-./run.sh --source data/source_face.webm --camera 1 --preset natural --output both
+./run.sh --source data/source_face.webm --camera 1 --width 800 --height 600
+```
+
+Prepare source identity (no camera needed):
+
+```bash
+./run.sh --source data/source_face.webm --camera 1 --prepare-source /tmp/prepared_source.png
 ```

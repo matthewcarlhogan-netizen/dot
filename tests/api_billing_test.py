@@ -31,7 +31,7 @@ class FakeBackend:
             raise HTTPException(status_code=400, detail="No face detected in source image.")
         return np.zeros((1, 512), dtype=np.float32)
 
-    def _swap_target(self, _image_bytes, _source_embedding):
+    def _swap_target(self, _image_bytes, _source_embedding, source_bytes=None):
         if self.fail_swap:
             raise RuntimeError("backend failed")
         return b"png-bytes"

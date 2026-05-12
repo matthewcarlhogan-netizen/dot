@@ -217,15 +217,31 @@ class Handler(BaseHTTPRequestHandler):
         def value(name: str, default: str) -> str:
             return form.get(name, [default])[0]
 
+        # Build command with only valid live.py flags
         cmd = [
             str(ROOT / "run.sh"),
             "--source", value("source", "data/source_face.webm"),
             "--camera", value("camera", "1"),
-            "--backend", value("backend", "simswap"),
-            "--style", value("style", "swap"),
-            "--preset", value("preset", "natural"),
-            "--output", value("output", "window"),
         ]
+        
+        # Add optional flags that live.py actually supports
+        width = value("width", "640")
+        if width != "640":  # Only add if not default
+            cmd.extend(["--width", width])
+            
+        height = value("height", "480")
+        if height != "480":  # Only add if not default
+            cmd.extend(["--height", height])
+            
+        if value("prepare-source", ""):
+            cmd.extend(["--prepare-source", value("prepare-source", "")])
+            
+        cache_dir = value("source-cache-dir", str(ROOT / ".cache" / "prepared_sources"))
+        if cache_dir != str(ROOT / ".cache" / "prepared_sources"):  # Only add if not default
+            cmd.extend(["--source-cache-dir", cache_dir])
+            
+        if value("debug", "false") == "true":
+            cmd.append("--debug")
         PROCESS = subprocess.Popen(cmd, cwd=ROOT)
         STARTED_AT = time.time()
         self._json({"ok": True, "cmd": cmd, **process_status()})

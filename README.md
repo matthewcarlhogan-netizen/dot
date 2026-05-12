@@ -44,7 +44,7 @@ source image/video + physical webcam id -> swapped frames -> window or optional 
 ## Run
 
 ```bash
-./run.sh --source data/source_face.webm --camera 1 --preset natural
+./run.sh --source data/source_face.webm --camera 1
 ```
 
 Default output is the OpenCV window named `DOT - Live Deepfake`.
@@ -53,14 +53,14 @@ Useful options:
 
 ```bash
 ./run.sh --help
-./run.sh --source data/source_face.jpg --camera 1 --preset fast
-./run.sh --source data/source_face.webm --camera 1 --preset natural --output both
-./run.sh --source data/source_face.webm --camera 1 --backend onnx
+./run.sh --source data/source_face.jpg --camera 1
+./run.sh --source data/source_face.webm --camera 1 --width 640 --height 480
+./run.sh --source data/source_face.webm --camera 1 --prepare-source /tmp/prepared.png
 ```
 
-`--backend simswap` is the installed default. `--backend onnx` is reserved for `saved_models/onnx/inswapper_128_fp16.onnx` and fails clearly until that model path is wired.
+`--backend simswap` is the installed default. To use the ONNX backend, place the model at `saved_models/onnx/inswapper_128_fp16.onnx` and set the environment variable `DOT_BACKEND=onnx` (note: the ONNX backend is experimental and requires additional dependencies).
 
-`--output virtualcam` and `--output both` require `pyvirtualcam` plus a supported virtual camera provider. On macOS 13+, pyvirtualcam expects OBS 30+ virtual camera support to be initialized once.
+`--output virtualcam` is not supported in this version. The output is always the OpenCV window. For virtual camera output, use a separate tool to capture the OpenCV window.
 
 ## Local Web Control
 

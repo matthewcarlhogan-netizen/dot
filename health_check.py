@@ -61,7 +61,7 @@ def main() -> int:
         print("[WARN] Close other apps before running the 512px preset.")
 
     if ok:
-        print("\nReady: ./run.sh --source data/source_face.webm --camera 1 --preset natural")
+        print("\nReady: ./run.sh --source data/source_face.webm --camera 1")
         return 0
     return 1
 

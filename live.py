@@ -266,6 +266,19 @@ class VirtualCameraSink:
         self._cam.close()
 
 
+class NullCameraSink:
+    """Fallback camera sink that does nothing - for benchmarking without pyvirtualcam."""
+
+    def __init__(self, width: int, height: int, fps: int = 20):
+        print("[dot] Null camera sink (pyvirtualcam not available)")
+
+    def send_bgr(self, frame):
+        pass
+
+    def close(self):
+        pass
+
+
 class OnnxBackend:
     def __init__(self, config: dict | None = None):
         self.config = config or {}
@@ -286,7 +299,7 @@ class OnnxBackend:
             max_num_faces=int(self.config.get("max_num_faces", 1)),
             refine_landmarks=True,
             min_detection_confidence=float(self.config.get("detection_threshold", 0.55)),
-            min_tracking_confidence=0.5,
+            min_tracking_confidence=float(self.config.get("min_tracking_confidence", 0.5)),
             mode="None",
         )
         self.session = None
@@ -325,9 +338,24 @@ class OnnxBackend:
         available = ort.get_available_providers()
         providers = [provider for provider in ("CoreMLExecutionProvider", "CPUExecutionProvider") if provider in available]
         providers = providers or available
+        
+        # Configure session options for performance tuning
+        sess_options = ort.SessionOptions()
+        intra_op_threads = int(os.getenv("DOT_ORT_INTRA_THREADS", "8"))
+        inter_op_threads = int(os.getenv("DOT_ORT_INTER_THREADS", "1"))
+        sess_options.intra_op_num_threads = intra_op_threads
+        sess_options.inter_op_num_threads = inter_op_threads
+        
+        # Set execution provider from environment if specified
+        env_provider = os.getenv("DOT_ORT_PROVIDERS")
+        if env_provider and env_provider in available:
+            providers = [env_provider]
+            print(f"[dot] Using DOT_ORT_PROVIDERS override: {env_provider}")
+        
         print("[dot] Loading ONNX inswapper ...")
-        self.session = ort.InferenceSession(str(self.model_path), providers=providers)
+        self.session = ort.InferenceSession(str(self.model_path), sess_options, providers=providers)
         print(f"[dot] ONNX providers: {', '.join(self.session.get_providers())}")
+        print(f"[dot] ONNX session options: intra_op={intra_op_threads}, inter_op={inter_op_threads}")
 
         print("[dot] Preparing source crop and extracting ONNX identity ...")
         detection_threshold = float(self.config.get("detection_threshold", 0.55))
@@ -418,7 +446,12 @@ def main() -> int:
     virtualcam = None
     cap = None
     try:
-        virtualcam = VirtualCameraSink(args.width, args.height)
+        # Use NullCameraSink as fallback if pyvirtualcam is not available
+        try:
+            virtualcam = VirtualCameraSink(args.width, args.height)
+        except RuntimeError:
+            print("[dot] pyvirtualcam not available, using null sink for benchmarking")
+            virtualcam = NullCameraSink(args.width, args.height)
 
         prepared_source = resolve_source_for_backend(
             source=source,
