@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Standalone live face swap.
+"""Standalone highest-quality live face swap.
 
 Input: source image/video + physical webcam id.
-Output: OpenCV window by default, optional Python virtual camera.
+Output: virtual camera feed only.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import sys
 import time
 import warnings
 from pathlib import Path
-from typing import Literal
 
 import cv2
 import numpy as np
@@ -29,27 +28,15 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 warnings.filterwarnings("ignore", message="SymbolDatabase.GetPrototype.*")
 
 ROOT = Path(__file__).resolve().parent
-WINDOW_NAME = "DOT - Live Deepfake"
 
 sys.path.insert(0, str(ROOT / "src"))
 
 from runtime_guard import warn_nested_checkout  # noqa: E402
 from dot.commons.utils import get_device  # noqa: E402
-from dot.simswap import SimswapOption  # noqa: E402
 from dot.simswap.fs_model import legacy_simswap_import_path  # noqa: E402
 from dot.simswap.mediapipe.face_mesh import FaceMesh  # noqa: E402
 
-PresetName = Literal["fast", "balanced", "natural", "natural-max"]
-BackendName = Literal["simswap", "onnx"]
-OutputName = Literal["window", "virtualcam", "both"]
-StyleName = Literal["swap", "avatar"]
-
-PRESETS: dict[PresetName, Path] = {
-    "fast": ROOT / "configs" / "simswap.yaml",
-    "balanced": ROOT / "configs" / "m2_8gb_balanced.yaml",
-    "natural": ROOT / "configs" / "m2_8gb_natural.yaml",
-    "natural-max": ROOT / "configs" / "m2_8gb_natural_max.yaml",
-}
+HIGHEST_QUALITY_PRESET = ROOT / "configs" / "m2_8gb_natural_max.yaml"
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 
@@ -58,21 +45,17 @@ def load_config(path: Path) -> dict:
         return yaml.safe_load(handle) or {}
 
 
-def ensure_supported_model_config(config: dict) -> dict:
+def ensure_highest_quality_model_config(config: dict) -> dict:
     if config.get("swap_type", "simswap") != "simswap":
-        return config
-    if int(config.get("crop_size", 224)) != 512:
-        return config
+        raise RuntimeError("Highest-quality mode requires swap_type: simswap in preset config.")
 
     checkpoints_dir = Path(config.get("checkpoints_dir", "saved_models/simswap/checkpoints"))
     checkpoint_512 = checkpoints_dir / "512" / "550000_net_G.pth"
-    if checkpoint_512.exists():
-        return config
-
-    print("[dot] 512px SimSwap checkpoint missing; falling back to 224px.")
-    print(f"[dot] Missing: {checkpoint_512}")
-    config = dict(config)
-    config["crop_size"] = 224
+    if not checkpoint_512.exists():
+        raise RuntimeError(
+            "Highest-quality mode requires the 512px SimSwap checkpoint at "
+            f"{checkpoint_512}."
+        )
     return config
 
 
@@ -103,13 +86,6 @@ def open_camera(camera_id: int, width: int, height: int) -> cv2.VideoCapture:
 def reopen_camera(camera_id: int, width: int, height: int) -> cv2.VideoCapture:
     print(f"[dot] Attempting to reopen camera {camera_id} ...")
     return open_camera(camera_id, width, height)
-
-
-def draw_fps(frame, fps: float):
-    frame = np.ascontiguousarray(frame)
-    cv2.putText(frame, f"FPS: {fps:.1f}", (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 3)
-    cv2.putText(frame, f"FPS: {fps:.1f}", (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1)
-    return frame
 
 
 def read_source_frame(path: Path) -> np.ndarray:
@@ -284,54 +260,10 @@ class VirtualCameraSink:
     def send_bgr(self, frame):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         self._cam.send(rgb)
+        self._cam.sleep_until_next_frame()
 
     def close(self):
         self._cam.close()
-
-
-class SimSwapBackend:
-    def __init__(self, config: dict):
-        self.config = config
-        self.option = SimswapOption(
-            use_gpu=True,
-            crop_size=config.get("crop_size", 224),
-            use_mask=config.get("use_mask", False),
-        )
-
-    def load(self, source: Path):
-        config = self.config
-        crop_size = config.get("crop_size", 224)
-        print("[dot] Loading SimSwap models ...")
-        self.option.create_model(
-            opt_crop_size=crop_size,
-            opt_fp16=config.get("use_fp16", False),
-            max_num_faces=config.get("max_num_faces", 1),
-            detection_threshold=config.get("detection_threshold", 0.6),
-            min_detection_confidence=config.get("detection_threshold", 0.6),
-            parsing_model_path=config.get("parsing_model_path"),
-            arcface_model_path=config.get("arcface_model_path"),
-            checkpoints_dir=config.get("checkpoints_dir"),
-        )
-        print("[dot] Loading source identity ...")
-        self.option.change_option(str(source))
-        print("[dot] Ready.")
-
-    def process(self, frame):
-        config = self.config
-        return self.option.process_image(
-            frame,
-            use_cam=True,
-            natural_color_match=config.get("natural_color_match", False),
-            natural_color_match_strength=config.get("natural_color_match_strength", 0.65),
-            natural_detail_enhance=config.get("natural_detail_enhance", False),
-            natural_detail_enhance_strength=config.get("natural_detail_enhance_strength", 0.12),
-            natural_preserve_occluders=config.get("natural_preserve_occluders", False),
-            natural_occluder_threshold=config.get("natural_occluder_threshold", 0.10),
-            natural_occluder_strength=config.get("natural_occluder_strength", 0.90),
-            natural_blend_mode=config.get("natural_blend_mode", "alpha"),
-            natural_blend_strength=config.get("natural_blend_strength", 1.0),
-            natural_mask_blur=config.get("natural_mask_blur", 0),
-        )
 
 
 class OnnxBackend:
@@ -437,102 +369,27 @@ class OnnxBackend:
         return output
 
 
-class AvatarBackend:
-    def __init__(self, config: dict | None = None):
-        self.config = config or {}
-        self.detector = FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=float(self.config.get("detection_threshold", 0.55)),
-            min_tracking_confidence=0.5,
-            mode="None",
-        )
-        self.skin_tint = np.array([170, 190, 220], dtype=np.float32)
-
-    def load(self, source: Path):
-        detection_threshold = float(self.config.get("detection_threshold", 0.55))
-        try:
-            crop = load_source_face_crop(source=source, size=256, detection_threshold=detection_threshold)
-            self.skin_tint = crop.reshape(-1, 3).mean(axis=0).astype(np.float32)
-        except RuntimeError:
-            pass
-        print("[dot] Avatar style ready.")
-
-    def _enlarge_region(self, image: np.ndarray, center: tuple[int, int], radius: int, strength: float) -> np.ndarray:
-        height, width = image.shape[:2]
-        cx, cy = center
-        x0, x1 = max(0, cx - radius), min(width, cx + radius)
-        y0, y1 = max(0, cy - radius), min(height, cy + radius)
-        if x1 <= x0 or y1 <= y0:
-            return image
-        roi = image[y0:y1, x0:x1].copy()
-        yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
-        dx = xx - cx
-        dy = yy - cy
-        dist = np.sqrt(dx * dx + dy * dy)
-        mask = np.clip(1.0 - dist / max(radius, 1), 0.0, 1.0) ** 2
-        scale = 1.0 - strength * mask
-        map_x = (cx + dx * scale).astype(np.float32) - x0
-        map_y = (cy + dy * scale).astype(np.float32) - y0
-        image[y0:y1, x0:x1] = cv2.remap(roi, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-        return image
-
-    def _stylize_crop(self, crop: np.ndarray) -> np.ndarray:
-        crop = cv2.resize(crop, (256, 256), interpolation=cv2.INTER_CUBIC)
-        smooth = cv2.bilateralFilter(crop, 9, 80, 80)
-        quantized = (smooth // 32) * 32 + 16
-        tint = np.full_like(quantized, self.skin_tint)
-        stylized = cv2.addWeighted(quantized.astype(np.float32), 0.72, tint.astype(np.float32), 0.28, 0)
-        stylized = np.clip(stylized, 0, 255).astype(np.uint8)
-        stylized = self._enlarge_region(stylized, (92, 105), 34, 0.32)
-        stylized = self._enlarge_region(stylized, (164, 105), 34, 0.32)
-        stylized = self._enlarge_region(stylized, (128, 160), 26, 0.16)
-        gray = cv2.cvtColor(stylized, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 55, 120)
-        edges = cv2.dilate(edges, np.ones((2, 2), np.uint8), iterations=1)
-        stylized[edges > 0] = (24, 24, 24)
-        cv2.ellipse(stylized, (128, 132), (102, 120), 0, 0, 360, (32, 32, 32), 3)
-        return stylized
-
-    def process(self, frame):
-        result = self.detector.get(frame, 256)
-        if result is None:
-            return frame
-        avatar = self._stylize_crop(result[0][0])
-        return soft_paste(frame, avatar, result[1][0], blur=31)
-
-
-def make_backend(name: str, style: str, config: dict):
-    if style == "avatar":
-        return AvatarBackend(config)
-    if name == "onnx":
-        return OnnxBackend(config)
-    return SimSwapBackend(config)
+def enforce_highest_quality_mode(args):
+    args.preset = "natural-max"
+    return args
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Local live face swap: source image/video + webcam -> output."
+        description="Local live face swap: source image/video + webcam -> highest-quality virtual camera feed."
     )
     parser.add_argument("--source", default="data/source_face.webm")
     parser.add_argument("--camera", type=int, default=1)
-    parser.add_argument("--backend", choices=["simswap", "onnx"], default="simswap")
-    parser.add_argument("--style", choices=["swap", "avatar"], default="swap")
-    parser.add_argument("--preset", choices=sorted(PRESETS), default="natural")
-    parser.add_argument("--output", choices=["window", "virtualcam", "both"], default="window")
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--prepare-source", help="write an aligned, lighting-normalized source image and exit")
-    parser.add_argument("--no-source-prepare", action="store_true", help="disable source face preparation/cache")
     parser.add_argument("--source-cache-dir", default=str(ROOT / ".cache" / "prepared_sources"))
-    parser.add_argument("--no-fps", action="store_true")
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
 
 def main() -> int:
-    args = parse_args()
+    args = enforce_highest_quality_mode(parse_args())
     warn_nested_checkout(ROOT)
     source = Path(args.source)
     if not source.exists():
@@ -544,41 +401,35 @@ def main() -> int:
         print(output)
         return 0
 
-    config_path = PRESETS[args.preset]
-    config = ensure_supported_model_config(load_config(config_path))
+    config_path = HIGHEST_QUALITY_PRESET
+    config = ensure_highest_quality_model_config(load_config(config_path))
 
     print("DOT live")
     print(f"  Source : {source}")
     print(f"  Camera : {args.camera}")
-    print(f"  Backend: {args.backend}")
-    print(f"  Style  : {args.style}")
+    print("  Backend: onnx")
+    print("  Style  : swap")
     print(f"  Preset : {args.preset}")
-    print(f"  Output : {args.output}")
+    print("  Output : virtualcam")
     print(f"  Device : {get_device()}")
     print(f"  Memory : {psutil.virtual_memory().available / (1024 ** 3):.1f}GB available")
     print()
 
     virtualcam = None
     cap = None
-    show_window = args.output in {"window", "both"}
     try:
-        if args.output in {"virtualcam", "both"}:
-            virtualcam = VirtualCameraSink(args.width, args.height)
+        virtualcam = VirtualCameraSink(args.width, args.height)
 
         prepared_source = resolve_source_for_backend(
             source=source,
-            prepare_source=not args.no_source_prepare,
+            prepare_source=True,
             cache_dir=Path(args.source_cache_dir),
         )
         print(f"  Engine : source={prepared_source}")
 
-        backend = make_backend(args.backend, args.style, config)
+        backend = OnnxBackend(config)
         backend.load(prepared_source)
         cap = open_camera(args.camera, args.width, args.height)
-
-        if show_window:
-            cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_GUI_NORMAL)
-            cv2.moveWindow(WINDOW_NAME, 500, 250)
 
         last = time.monotonic()
         fps = 0.0
@@ -620,24 +471,12 @@ def main() -> int:
             last = now
             fps = 0.9 * fps + 0.1 * (1.0 / elapsed) if fps else 1.0 / elapsed
 
-            if not args.no_fps and show_window:
-                swapped = draw_fps(swapped, fps)
-            if show_window:
-                cv2.imshow(WINDOW_NAME, swapped)
-            if virtualcam:
-                virtualcam.send_bgr(swapped)
-
-            key = cv2.waitKey(1) if show_window else -1
-            if key in {ord("q"), 27}:
-                break
+            virtualcam.send_bgr(swapped)
     finally:
         if cap:
             cap.release()
         if virtualcam:
             virtualcam.close()
-        if show_window:
-            cv2.destroyAllWindows()
-
     return 0
 
 

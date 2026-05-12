@@ -7,27 +7,37 @@ import live
 
 
 def test_presets_load():
-    for path in live.PRESETS.values():
-        config = live.load_config(path)
-        assert config.get("swap_type", "simswap") == "simswap"
+    config = live.load_config(live.HIGHEST_QUALITY_PRESET)
+    assert config.get("swap_type", "simswap") == "simswap"
 
 
 def test_natural_blend_modes():
-    natural = live.load_config(live.PRESETS["natural"])
-    natural_max = live.load_config(live.PRESETS["natural-max"])
-    assert natural["natural_blend_mode"] == "alpha"
+    natural_max = live.load_config(live.HIGHEST_QUALITY_PRESET)
     assert natural_max["natural_blend_mode"] == "poisson"
-    assert natural["natural_blend_strength"] < 1.0
-    assert natural_max["natural_mask_blur"] >= natural["natural_mask_blur"]
+    assert natural_max["natural_blend_strength"] >= 0.9
+    assert natural_max["natural_mask_blur"] >= 25
 
 
-def test_512_fallback(tmp_path):
+def test_512_checkpoint_required(tmp_path):
     config = {
         "swap_type": "simswap",
         "crop_size": 512,
         "checkpoints_dir": str(tmp_path / "missing"),
     }
-    assert live.ensure_supported_model_config(config)["crop_size"] == 224
+    with pytest.raises(RuntimeError, match="requires the 512px SimSwap checkpoint"):
+        live.ensure_highest_quality_model_config(config)
+
+
+def test_512_checkpoint_valid(tmp_path):
+    checkpoint = tmp_path / "checkpoints" / "512" / "550000_net_G.pth"
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint.write_bytes(b"ok")
+    config = {
+        "swap_type": "simswap",
+        "crop_size": 512,
+        "checkpoints_dir": str(tmp_path / "checkpoints"),
+    }
+    assert live.ensure_highest_quality_model_config(config) == config
 
 
 def test_virtualcam_missing_is_clear(monkeypatch):
@@ -59,9 +69,28 @@ def test_source_crop_preparation_preserves_shape():
     assert prepared.std() > 0
 
 
-def test_avatar_style_selects_avatar_backend():
-    backend = live.make_backend("simswap", "avatar", {"detection_threshold": 0.5})
-    assert isinstance(backend, live.AvatarBackend)
+def test_highest_quality_mode_enforces_preset():
+    class Args:
+        preset = "natural"
+
+    args = live.enforce_highest_quality_mode(Args())
+    assert args.preset == "natural-max"
+
+
+def test_parse_args_exposes_single_function_surface(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["live.py", "--source", "data/source_face.webm", "--camera", "1"])
+    args = live.parse_args()
+    assert hasattr(args, "source")
+    assert hasattr(args, "camera")
+    assert hasattr(args, "width")
+    assert hasattr(args, "height")
+    assert hasattr(args, "prepare_source")
+    assert hasattr(args, "source_cache_dir")
+    assert hasattr(args, "debug")
+    assert not hasattr(args, "backend")
+    assert not hasattr(args, "style")
+    assert not hasattr(args, "preset")
+    assert not hasattr(args, "output")
 
 
 def test_prepared_source_cache_path_changes_with_mtime(tmp_path):
